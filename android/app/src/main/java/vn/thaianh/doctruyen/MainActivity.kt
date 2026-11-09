@@ -110,11 +110,21 @@ class MainActivity : ComponentActivity() {
 
         // nút chính
         btnMain = Button(this).apply {
-            textSize = 22f; isAllCaps = false; setTypeface(typeface, Typeface.BOLD)
+            textSize = 18f; isAllCaps = false; setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(76)).apply { topMargin = dp(22) }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(64)).apply { topMargin = dp(6) }
             setOnClickListener { onMainClick() }
         }
+        // trình đọc trong app (dùng cho Tencent và web chặn chụp màn hình)
+        col.addView(Button(this).apply {
+            text = "📖  ĐỌC TRUYỆN TENCENT TRONG APP"; textSize = 18f; isAllCaps = false
+            setTypeface(typeface, Typeface.BOLD); setTextColor(Color.WHITE)
+            background = roundBg("#2563EB", 22)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(70)).apply { topMargin = dp(16) }
+            setOnClickListener { startActivity(Intent(this@MainActivity, ReaderActivity::class.java)) }
+        })
+        col.addView(text("Lướt tới đâu dịch tới đó, không cần chia sẻ màn hình", 14f, color = "#8A7462").apply { setPadding(0, dp(6), 0, 0) })
+        col.addView(text("Nút cam bên dưới: dịch đè lên app khác (app không chặn chụp)", 14f, color = "#8A7462").apply { setPadding(0, dp(18), 0, 0) })
         col.addView(btnMain)
 
         // trạng thái
@@ -202,7 +212,7 @@ class MainActivity : ComponentActivity() {
 
     private fun refresh() {
         val running = ScreenTranslateService.running
-        btnMain.text = if (running) "■  TẮT DỊCH" else "🐾  BẬT DỊCH"
+        btnMain.text = if (running) "■  TẮT DỊCH MÀN HÌNH" else "🐾  DỊCH ĐÈ MÀN HÌNH"
         btnMain.background = roundBg(if (running) "#6B7280" else ORANGE_DARK, 22)
         val ov = Settings.canDrawOverlays(this)
         chipOverlay.text = if (ov) "✅ Nổi" else "⚠️ Nổi"
