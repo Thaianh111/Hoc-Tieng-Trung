@@ -89,7 +89,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.parseColor("#FFF6EA")
 
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -167,7 +166,19 @@ class MainActivity : ComponentActivity() {
 
         col.addView(text("© Võ Thái Anh", 13f, color = "#B4A08C").apply { setPadding(0, dp(18), 0, 0) })
 
-        setContentView(ScrollView(this).apply { addView(col); setBackgroundColor(Color.parseColor("#FFF6EA")) })
+        val root = ScrollView(this).apply { addView(col); setBackgroundColor(Color.parseColor("#FFF6EA")) }
+        // Android 15 vẽ tràn lên thanh trạng thái: chừa chỗ cho khỏi bị che
+        root.setOnApplyWindowInsetsListener { v, insets ->
+            val top = if (Build.VERSION.SDK_INT >= 30)
+                insets.getInsets(android.view.WindowInsets.Type.systemBars()).top
+            else @Suppress("DEPRECATION") insets.systemWindowInsetTop
+            val bottom = if (Build.VERSION.SDK_INT >= 30)
+                insets.getInsets(android.view.WindowInsets.Type.systemBars()).bottom
+            else @Suppress("DEPRECATION") insets.systemWindowInsetBottom
+            v.setPadding(0, top, 0, bottom)
+            insets
+        }
+        setContentView(root)
     }
 
     private fun row(icon: Int, color: String, label: String) = LinearLayout(this).apply {
@@ -249,9 +260,11 @@ class MainActivity : ComponentActivity() {
         if (k.isEmpty()) { keyStatus.text = "Đã xoá mã. App sẽ dùng bộ dịch trong máy."; return }
         keyStatus.text = "⏳ Đang thử mã..."
         lifecycleScope.launch {
-            val ok = Translate.testKey(k)
-            keyStatus.text = if (ok) "✅ Mã dùng được! Từ giờ app dịch bằng AI."
-            else "❌ Mã chưa dùng được (${Translate.lastAiError ?: "lỗi"}). Anh kiểm tra lại mã hoặc mạng nha."
+            keyStatus.text = when (Translate.testKey(k)) {
+                1 -> "✅ Mã dùng được! Từ giờ app dịch bằng AI."
+                0 -> "❌ Mã không đúng (${Translate.lastAiError}). Anh copy lại mã nha."
+                else -> "🟡 Đã lưu mã. Máy chủ AI của Google đang bận (${Translate.lastAiError ?: "mạng chập chờn"}). App vẫn dịch bằng AI khi nó rảnh, lúc bận thì tự dùng bộ dịch trong máy."
+            }
         }
     }
 

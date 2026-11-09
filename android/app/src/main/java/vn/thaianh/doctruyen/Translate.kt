@@ -9,6 +9,7 @@ import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.TranslatorOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -94,47 +95,75 @@ object Translate {
         "- Tiếng động, ký hiệu: dịch rất ngắn hoặc giữ nguyên. Chữ nhận sai, vô nghĩa: trả về chuỗi rỗng.\n" +
         "Chỉ trả về một mảng JSON các chuỗi, ĐÚNG số phần tử và ĐÚNG thứ tự như đầu vào.\n\nĐầu vào:\n"
 
+    /** Lỗi do máy chủ AI bận (không phải do mã). */
+    class AiBusy(msg: String) : RuntimeException(msg)
+    class AiBadKey(msg: String) : RuntimeException(msg)
+
+    private val MODELS = listOf(
+        "gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash"
+    )
+
     private suspend fun gemini(key: String, texts: List<String>): List<String>? = withContext(Dispatchers.IO) {
         val input = JSONArray(texts).toString()
-        for (model in listOf("gemini-flash-latest", "gemini-2.5-flash")) {
-            for (withThinkingOff in listOf(true, false)) {
+        var lastBusy: String? = null
+        for (model in MODELS) {
+            var thinkingOff = true
+            var attempt = 0
+            while (attempt < 3) {
+                attempt++
                 val gen = JSONObject()
                     .put("temperature", 0.3)
                     .put("responseMimeType", "application/json")
-                if (withThinkingOff) gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+                if (thinkingOff) gen.put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
                 val body = JSONObject()
                     .put("contents", JSONArray().put(JSONObject()
                         .put("role", "user")
                         .put("parts", JSONArray().put(JSONObject().put("text", PROMPT + input)))))
                     .put("generationConfig", gen)
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-                val con = (url.openConnection() as HttpURLConnection).apply {
+                val con = (URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+                    .openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 8000; readTimeout = 25000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                     setRequestProperty("x-goog-api-key", key)
                 }
-                con.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                val code = con.responseCode
-                val resp = (if (code in 200..299) con.inputStream else con.errorStream)
-                    ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-                con.disconnect()
-                if (code == 400 && withThinkingOff) continue        // mẫu này không hỗ trợ tắt suy nghĩ
-                if (code == 404) break                               // thử tên mẫu khác
-                if (code !in 200..299) throw RuntimeException("AI báo lỗi $code")
-                val text = JSONObject(resp).getJSONArray("candidates").getJSONObject(0)
-                    .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                val clean = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-                val arr = JSONArray(clean)
-                return@withContext List(arr.length()) { arr.optString(it, "") }
+                val (code, resp) = try {
+                    con.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    val c = con.responseCode
+                    val r = (if (c in 200..299) con.inputStream else con.errorStream)
+                        ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                    Pair(c, r)
+                } finally { con.disconnect() }
+
+                when {
+                    code in 200..299 -> {
+                        val text = JSONObject(resp).getJSONArray("candidates").getJSONObject(0)
+                            .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                        val clean = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                        val arr = JSONArray(clean)
+                        return@withContext List(arr.length()) { arr.optString(it, "") }
+                    }
+                    code == 400 && resp.contains("API_KEY_INVALID") -> throw AiBadKey("mã không đúng")
+                    code == 400 && thinkingOff -> { thinkingOff = false; attempt-- }   // mẫu không hỗ trợ tắt suy nghĩ
+                    code == 401 || code == 403 -> throw AiBadKey("mã không có quyền ($code)")
+                    code == 404 -> break                                                 // mẫu không còn, thử mẫu khác
+                    code == 429 || code >= 500 -> {                                     // AI bận: chờ chút rồi thử lại / đổi mẫu
+                        lastBusy = "AI đang bận ($code)"
+                        if (attempt < 2) delay(800L * attempt) else break
+                    }
+                    else -> break
+                }
             }
         }
+        if (lastBusy != null) throw AiBusy(lastBusy)
         null
     }
 
     /** Thử mã Gemini anh vừa dán. */
-    suspend fun testKey(key: String): Boolean = try {
-        gemini(key, listOf("师父，我已经突破筑基了！"))?.firstOrNull()?.isNotBlank() == true
-    } catch (e: Exception) { lastAiError = e.message; false }
+    /** 1 = dùng được, 0 = mã sai, -1 = mã đúng nhưng AI đang bận/mất mạng. */
+    suspend fun testKey(key: String): Int = try {
+        if (gemini(key, listOf("师父，我已经突破筑基了！"))?.firstOrNull()?.isNotBlank() == true) 1 else -1
+    } catch (e: AiBadKey) { lastAiError = e.message; 0 }
+    catch (e: Exception) { lastAiError = e.message; -1 }
 }
