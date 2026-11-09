@@ -178,14 +178,13 @@ object Translate {
 
     // ───────────── FreeModel (kiểu OpenAI) ─────────────
     private const val FM_BASE = "https://freemodel.in/v1"
-    /** Ưu tiên mẫu nhỏ, nhanh, rẻ token; trong danh sách có gì thì lấy nấy. */
-    private val FM_PREFER = listOf("mini", "flash", "lite", "haiku", "small", "fast", "turbo")
-    private val FM_FALLBACK = listOf("gpt-5.4-mini", "gpt-4o-mini", "gpt-5-mini")
+    /** Mẫu nhanh (~3 giây/trang), đã thử dịch truyện ngon. Mẫu "pro" suy nghĩ lâu nên không dùng. */
+    private val FM_FAST = listOf("gemini-3.6-flash", "deepseek-v4.1-flash", "seed-2.1-turbo", "gemini-3.7-flash", "glm-5.3-flash")
 
     private fun http(method: String, url: String, key: String, body: String?): Pair<Int, String> {
         val con = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method
-            connectTimeout = 8000; readTimeout = 25000
+            connectTimeout = 8000; readTimeout = 12000
             setRequestProperty("Authorization", "Bearer $key")
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             if (body != null) doOutput = true
@@ -199,25 +198,10 @@ object Translate {
         } finally { con.disconnect() }
     }
 
-    /** Hỏi FreeModel có những mẫu nào, xếp mẫu nhỏ/nhanh lên đầu. */
-    private fun fmCandidates(ctx: Context, key: String): List<String> {
-        val out = mutableListOf<String>()
-        Prefs.fmModel(ctx).takeIf { it.isNotEmpty() }?.let { out += it }
-        try {
-            val (code, resp) = http("GET", "$FM_BASE/models", key, null)
-            if (code == 401 || code == 403) throw AiBadKey("mã không đúng ($code)")
-            if (code in 200..299) {
-                val arr = JSONObject(resp).optJSONArray("data") ?: JSONArray()
-                val ids = List(arr.length()) { arr.getJSONObject(it).optString("id") }
-                    .filter { it.isNotBlank() && !it.contains("image", true) && !it.contains("embed", true) }
-                val ranked = ids.sortedBy { id ->
-                    FM_PREFER.indexOfFirst { id.contains(it, true) }.let { if (it < 0) 99 else it }
-                }
-                out += ranked
-            }
-        } catch (e: AiBadKey) { throw e } catch (_: Exception) { }
-        out += FM_FALLBACK
-        return out.distinct().take(6)
+    /** Mẫu chạy được lần trước lên đầu, rồi tới các mẫu nhanh còn lại. */
+    private fun fmCandidates(ctx: Context): List<String> {
+        val saved = Prefs.fmModel(ctx)
+        return if (saved in FM_FAST) listOf(saved) + (FM_FAST - saved) else FM_FAST
     }
 
     /** Lấy mảng JSON trong câu trả lời (AI hay thêm chữ hoặc ``` bao quanh). */
@@ -231,7 +215,7 @@ object Translate {
     private suspend fun freeModel(ctx: Context, key: String, texts: List<String>): List<String>? = withContext(Dispatchers.IO) {
         val input = JSONArray(texts).toString()
         var lastBusy: String? = null
-        for (model in fmCandidates(ctx, key)) {
+        for (model in fmCandidates(ctx)) {
             var attempt = 0
             while (attempt < 2) {
                 attempt++
