@@ -319,6 +319,22 @@ class ScreenTranslateService : Service() {
 
         wm.addView(col, cp)
         controls = col; btnScan = scan; btnAuto = autoBtn
+
+        val st = TextView(this).apply {
+            textSize = 15f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            setPadding(dp(14), dp(9), dp(14), dp(9)); maxWidth = (screenW * 0.85f).toInt()
+            background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(Color.parseColor("#E6333333")) }
+            visibility = View.GONE
+        }
+        val sp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(70); alpha = 0.8f
+        }
+        wm.addView(st, sp)
+        statusView = st
+        toast("🐶 Đã bật! Mở truyện rồi bấm mặt husky để dịch", 3500)
     }
 
     private fun setAuto(on: Boolean) {
@@ -367,8 +383,13 @@ class ScreenTranslateService : Service() {
                 if (manual) toast("Chưa chụp được màn hình, anh thử lại nha")
                 return
             }
+            if (withContext(Dispatchers.Default) { isBlack(bmp) }) {
+                if (manual) toast("😢 Ảnh chụp ra màu đen: app này chặn chụp màn hình. Anh thử đọc trên web ac.qq.com bằng Chrome nha", 6000)
+                return
+            }
             val result = recognizer.process(InputImage.fromBitmap(bmp, 0)).await()
             val groups = groupBlocks(result)
+            if (manual) toast(if (groups.isEmpty()) "🔍 Không thấy chữ Trung trên màn hình" else "🔍 Thấy ${groups.size} khung chữ, đang dịch...", 2500)
             val vi = Translate.translatePage(this, groups.map { it.second })
             val list = ArrayList<BoxesView.Box>()
             for ((i, g) in groups.withIndex()) {
@@ -377,14 +398,16 @@ class ScreenTranslateService : Service() {
             }
             // trong lúc dịch mà anh đã lướt sang chỗ khác thì bỏ kết quả cũ
             val now = latest
-            if (now != null && now !== bmp) {
+            if (!manual && now != null && now !== bmp) {
                 val moved = withContext(Dispatchers.Default) { diff(signature(now), signature(bmp)) > CHANGE }
                 if (moved) { baseline = null; shownAt = SystemClock.uptimeMillis(); return }
             }
             if (manual && Prefs.geminiKey(this).isNotEmpty() && !Translate.lastUsedAi && groups.isNotEmpty())
-                toast("AI chưa dịch được (${Translate.lastAiError ?: "mất mạng?"}), dùng bộ dịch trong máy")
+                toast("AI chưa dịch được (${Translate.lastAiError ?: "mất mạng?"}), dùng bộ dịch trong máy", 3500)
             boxesView?.show(list)
-            if (list.isEmpty() && manual) toast("Không thấy chữ Trung trên màn hình")
+            if (manual && groups.isNotEmpty()) toast(
+                if (list.isEmpty()) "⚠️ Thấy chữ nhưng dịch chưa ra. AI bận và bộ dịch trong máy chưa tải xong?"
+                else "✅ Dịch xong ${list.size} khung" + if (Translate.lastUsedAi) " (AI)" else " (trong máy)", 2500)
             shownAt = SystemClock.uptimeMillis()
             baseline = null
         } catch (e: Exception) {
@@ -494,10 +517,30 @@ class ScreenTranslateService : Service() {
         }
     }
 
-    private fun toast(msg: String) {
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+    private var statusView: TextView? = null
+    private val hideStatus = Runnable { statusView?.visibility = View.GONE }
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** Hiện dòng thông báo nhỏ trên màn hình (tự làm, vì máy hay chặn Toast của app chạy nền). */
+    private fun toast(msg: String, ms: Long = 3000) {
+        mainHandler.post {
+            val v = statusView
+            if (v == null) {
+                Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show(); return@post
+            }
+            v.text = msg; v.visibility = View.VISIBLE
+            mainHandler.removeCallbacks(hideStatus)
+            mainHandler.postDelayed(hideStatus, ms)
         }
+    }
+
+    private fun isBlack(bmp: Bitmap): Boolean {
+        val small = Bitmap.createScaledBitmap(bmp, 24, 48, true)
+        val px = IntArray(24 * 48); small.getPixels(px, 0, 24, 0, 0, 24, 48)
+        if (small !== bmp) small.recycle()
+        var bright = 0
+        for (c in px) if (((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) > 60) bright++
+        return bright < px.size * 0.03   // gần như toàn bộ màu đen
     }
 
     override fun onDestroy() {
@@ -506,6 +549,8 @@ class ScreenTranslateService : Service() {
         scope.cancel()
         try { boxesView?.let { wm.removeView(it) } } catch (_: Exception) {}
         try { controls?.let { wm.removeView(it) } } catch (_: Exception) {}
+        try { statusView?.let { wm.removeView(it) } } catch (_: Exception) {}
+        mainHandler.removeCallbacksAndMessages(null)
         try { virtualDisplay?.release() } catch (_: Exception) {}
         try { reader?.close() } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}
