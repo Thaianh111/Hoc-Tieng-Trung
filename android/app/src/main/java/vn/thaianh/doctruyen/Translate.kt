@@ -45,6 +45,7 @@ object Translate {
     /** Lần dịch gần nhất có dùng AI không (để báo cho anh biết). */
     @Volatile var lastUsedAi = false
     @Volatile var lastAiError: String? = null
+    @Volatile private var aiCooldownUntil = 0L
 
     suspend fun isModelReady(): Boolean = try {
         val mgr = RemoteModelManager.getInstance()
@@ -70,10 +71,16 @@ object Translate {
         if (texts.isEmpty()) return emptyList()
         val key = Prefs.geminiKey(ctx)
         lastUsedAi = false
-        if (key.isNotEmpty()) {
+        val cooling = System.currentTimeMillis() < aiCooldownUntil
+        if (key.isNotEmpty() && !cooling) {
             val pageKey = "g:" + texts.joinToString("\u0001")
             cache.get(pageKey)?.let { lastUsedAi = true; return it.split("\u0001") }
-            val ai = try { gemini(key, texts) } catch (e: Exception) { lastAiError = e.message; null }
+            val ai = try {
+                kotlinx.coroutines.withTimeoutOrNull(15000) { gemini(key, texts) }
+                    ?: run { lastAiError = "AI trả lời quá chậm"; null }
+            } catch (e: Exception) { lastAiError = e.message; null }
+            // AI bận: nghỉ 1 phút rồi mới thử lại, trong lúc đó dịch bằng máy cho nhanh
+            if (ai == null) aiCooldownUntil = System.currentTimeMillis() + 60_000
             if (ai != null && ai.size == texts.size) {
                 lastUsedAi = true; lastAiError = null
                 cache.put(pageKey, ai.joinToString("\u0001"))

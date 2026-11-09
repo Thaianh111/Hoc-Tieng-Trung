@@ -53,6 +53,8 @@ class ReaderActivity : ComponentActivity() {
     private var busy = false
     private var pending = false
     private var scanGen = 0
+    private var lastCopyResult = 0
+    private var scans = 0
     private val autoScan = Runnable { if (auto) lifecycleScope.launch { scan(false) } }
     private val hideStatus = Runnable { status.visibility = View.GONE }
 
@@ -223,20 +225,32 @@ class ReaderActivity : ComponentActivity() {
         if (web.width == 0 || web.height == 0) return null
         val loc = IntArray(2); web.getLocationInWindow(loc)
         val bmp = Bitmap.createBitmap(web.width, web.height, Bitmap.Config.ARGB_8888)
-        return suspendCancellableCoroutine { cont ->
+        val viaCopy: Bitmap? = suspendCancellableCoroutine { cont ->
             try {
                 PixelCopy.request(window, Rect(loc[0], loc[1], loc[0] + web.width, loc[1] + web.height), bmp,
-                    { r -> cont.resume(if (r == PixelCopy.SUCCESS) bmp else null) }, handler)
-            } catch (e: Exception) { cont.resume(null) }
+                    { r -> lastCopyResult = r; cont.resume(if (r == PixelCopy.SUCCESS) bmp else null) }, handler)
+            } catch (e: Exception) { lastCopyResult = -1; cont.resume(null) }
         }
+        if (viaCopy != null) return viaCopy
+        // cách dự phòng: vẽ web ra ảnh
+        return try {
+            val b2 = Bitmap.createBitmap(web.width, web.height, Bitmap.Config.ARGB_8888)
+            web.draw(android.graphics.Canvas(b2)); b2
+        } catch (e: Exception) { null }
     }
 
+    private var spin: android.animation.ObjectAnimator? = null
     private fun setBusy(b: Boolean) {
-        if (b) btnScan.animate().rotationBy(360f).setDuration(600).start()
+        if (b) {
+            spin = android.animation.ObjectAnimator.ofFloat(btnScan, "rotation", -14f, 14f).apply {
+                duration = 250; repeatCount = android.animation.ValueAnimator.INFINITE
+                repeatMode = android.animation.ValueAnimator.REVERSE; start()
+            }
+        } else { spin?.cancel(); spin = null; btnScan.rotation = 0f }
     }
 
     private suspend fun scan(manual: Boolean) {
-        if (busy) { pending = true; return }
+        if (busy) { pending = true; if (manual) say("⏳ Husky đang dịch, chờ xíu nha"); return }
         if (Prefs.geminiKey(this).isEmpty() && !Translate.isModelReady()) {
             if (manual) say("⏳ Bộ dịch chưa tải xong, anh chờ chút nha")
             return
@@ -249,8 +263,14 @@ class ReaderActivity : ComponentActivity() {
             if (hadBoxes) delay(80)           // chờ ô dịch cũ biến mất khỏi hình
             val bmp = captureWeb() ?: run { if (manual) say("Chưa chụp được trang, anh thử lại nha"); return }
             val webLoc = IntArray(2); web.getLocationOnScreen(webLoc)
-            val groups = Ocr.read(bmp)
-            if (groups.isEmpty()) { if (manual) say("🔍 Không thấy chữ Trung ở đoạn này"); return }
+            val raw = Ocr.recognize(bmp)
+            val groups = Ocr.group(raw, 0)
+            scans++
+            if (groups.isEmpty()) {
+                // lần đầu hoặc bấm tay: báo chi tiết để biết hỏng ở đâu
+                if (manual || scans <= 2) say("🔍 Chưa thấy chữ Trung (ảnh ${bmp.width}×${bmp.height}, sáng ${brightness(bmp)}%, nhận ${raw.textBlocks.size} mảnh chữ, copy=$lastCopyResult)", 5000)
+                return
+            }
             if (manual) say("🔍 Thấy ${groups.size} khung chữ, đang dịch...", 6000)
             val vi = Translate.translatePage(this, groups.map { it.second })
             if (gen != scanGen) return        // anh đã lướt đi chỗ khác trong lúc dịch
@@ -271,11 +291,20 @@ class ReaderActivity : ComponentActivity() {
                 })
             }
         } catch (e: Exception) {
-            if (manual) say("Lỗi dịch: ${e.message}")
+            say("Lỗi dịch: ${e.javaClass.simpleName}: ${e.message}", 6000)
         } finally {
             busy = false
+            setBusy(false)
             if (pending) { pending = false; schedule(300) }
         }
+    }
+
+    private fun brightness(bmp: Bitmap): Int {
+        val small = Bitmap.createScaledBitmap(bmp, 16, 32, true)
+        val px = IntArray(16 * 32); small.getPixels(px, 0, 16, 0, 0, 16, 32)
+        var sum = 0L
+        for (c in px) sum += ((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3
+        return (sum * 100 / (px.size * 255L)).toInt()
     }
 
     override fun onDestroy() {
