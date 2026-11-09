@@ -33,6 +33,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -54,6 +55,7 @@ import kotlin.math.abs
 class ScreenTranslateService : Service() {
 
     companion object {
+        @Volatile var running = false
         const val ACTION_START = "vn.thaianh.doctruyen.START"
         const val ACTION_STOP = "vn.thaianh.doctruyen.STOP"
         const val EXTRA_CODE = "code"
@@ -87,8 +89,9 @@ class ScreenTranslateService : Service() {
 
     private var boxesView: BoxesView? = null
     private var controls: LinearLayout? = null
-    private var btnScan: TextView? = null
-    private var btnAuto: TextView? = null
+    private var btnScan: ImageView? = null
+    private var btnAuto: ImageView? = null
+    private var pulse: android.animation.ObjectAnimator? = null
 
     private val recognizer by lazy {
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
@@ -126,9 +129,10 @@ class ScreenTranslateService : Service() {
                 }
                 setupOverlay()
                 startWatchLoop()
+                running = true
                 scope.launch {
                     modelReady = Translate.isModelReady()
-                    if (!modelReady) {
+                    if (!modelReady && Prefs.geminiKey(this@ScreenTranslateService).isEmpty()) {
                         toast("Đang tải bộ dịch Trung → Việt, anh chờ chút...")
                         modelReady = Translate.ensureModel()
                         toast(if (modelReady) "Bộ dịch sẵn sàng rồi!" else "Chưa tải được bộ dịch, anh kiểm tra mạng nha")
@@ -150,7 +154,7 @@ class ScreenTranslateService : Service() {
         val openPi = PendingIntent.getActivity(this, 2,
             Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher_fg)
+            .setSmallIcon(R.drawable.paw)
             .setContentTitle("Đang dịch màn hình")
             .setContentText("Bấm \"Tắt\" để dừng dịch")
             .setContentIntent(openPi)
@@ -248,23 +252,32 @@ class ScreenTranslateService : Service() {
         wm.addView(bv, bp)
         boxesView = bv
 
-        // 3 nút tròn nổi
-        fun circle(label: String, color: String) = TextView(this).apply {
-            text = label; textSize = 22f; gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL; setColor(Color.parseColor(color))
-                setStroke(dp(2), Color.WHITE)
-            }
-            elevation = dp(4).toFloat()
-            layoutParams = LinearLayout.LayoutParams(dp(54), dp(54)).apply { bottomMargin = dp(8) }
+        // nút nổi: mặt husky = dịch, dấu chân = tự động, ✕ = tắt
+        fun round(color: String, sizeDp: Int) = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL; setColor(Color.parseColor(color)); setStroke(dp(2), Color.WHITE)
+        }.let { bgd -> Pair(bgd, sizeDp) }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
         }
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(4), dp(4), dp(4)) }
-        val scan = circle("🔍", "#CCB91C1C")
-        val autoBtn = circle("🔁", "#CC6B7280")
-        val close = circle("✕", "#99374151").apply {
-            textSize = 18f
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(7) }
+        val scan = ImageView(this).apply {
+            setImageResource(R.drawable.husky_btn)
+            background = round("#FFB74D", 62).first
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+            elevation = dp(6).toFloat()
+            layoutParams = LinearLayout.LayoutParams(dp(62), dp(62)).apply { bottomMargin = dp(8) }
+        }
+        val autoBtn = ImageView(this).apply {
+            setImageResource(R.drawable.paw)
+            background = round("#B39CA3AF", 46).first
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            elevation = dp(4).toFloat()
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(46)).apply { bottomMargin = dp(8) }
+        }
+        val close = TextView(this).apply {
+            text = "✕"; textSize = 14f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+            background = round("#99374151", 30).first
+            layoutParams = LinearLayout.LayoutParams(dp(30), dp(30))
         }
         col.addView(scan); col.addView(autoBtn); col.addView(close)
 
@@ -273,7 +286,7 @@ class ScreenTranslateService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = screenW - dp(70); y = screenH / 3
+            x = screenW - dp(74); y = screenH / 3
         }
 
         // kéo nút 🔍 để dời cả cụm; chạm nhẹ = dịch
@@ -311,19 +324,27 @@ class ScreenTranslateService : Service() {
     private fun setAuto(on: Boolean) {
         auto = on
         (btnAuto?.background as? GradientDrawable)?.setColor(
-            Color.parseColor(if (on) "#E615803D" else "#CC6B7280"))
-        toast(if (on) "TỰ ĐỘNG: lướt tới đâu dịch tới đó" else "Đã tắt tự động. Bấm 🔍 để dịch")
+            Color.parseColor(if (on) "#F022C55E" else "#B39CA3AF"))
+        toast(if (on) "🐾 Tự động: lướt tới đâu dịch tới đó" else "Tắt tự động. Bấm mặt husky để dịch")
         if (on) scope.launch { scan(manual = false) }
     }
 
     private fun setBusyUi(b: Boolean) {
-        btnScan?.text = if (b) "⏳" else "🔍"
+        val v = btnScan ?: return
+        if (b) {
+            pulse = android.animation.ObjectAnimator.ofFloat(v, "rotation", -12f, 12f).apply {
+                duration = 260; repeatCount = android.animation.ValueAnimator.INFINITE
+                repeatMode = android.animation.ValueAnimator.REVERSE; start()
+            }
+        } else {
+            pulse?.cancel(); pulse = null; v.rotation = 0f
+        }
     }
 
     // ---------------- nhận chữ + dịch ----------------
     private suspend fun scan(manual: Boolean) {
         if (busy) return
-        if (!modelReady) {
+        if (!modelReady && Prefs.geminiKey(this).isEmpty()) {
             modelReady = Translate.isModelReady()
             if (!modelReady) {
                 if (manual) toast("Bộ dịch chưa tải xong, anh chờ chút nha")
@@ -347,15 +368,21 @@ class ScreenTranslateService : Service() {
                 return
             }
             val result = recognizer.process(InputImage.fromBitmap(bmp, 0)).await()
+            val groups = groupBlocks(result)
+            val vi = Translate.translatePage(this, groups.map { it.second })
             val list = ArrayList<BoxesView.Box>()
-            for (block in result.textBlocks) {
-                val rect = block.boundingBox ?: continue
-                val zh = block.lines.joinToString("") { it.text }.replace(Regex("\\s+"), "")
-                if (!CJK.containsMatchIn(zh)) continue
-                val vi = Translate.translate(zh)
-                if (vi.isBlank()) continue
-                list.add(BoxesView.Box(Rect(rect), vi))
+            for ((i, g) in groups.withIndex()) {
+                val tr = vi.getOrNull(i)?.trim().orEmpty()
+                if (tr.isNotEmpty()) list.add(BoxesView.Box(g.first, tr))
             }
+            // trong lúc dịch mà anh đã lướt sang chỗ khác thì bỏ kết quả cũ
+            val now = latest
+            if (now != null && now !== bmp) {
+                val moved = withContext(Dispatchers.Default) { diff(signature(now), signature(bmp)) > CHANGE }
+                if (moved) { baseline = null; shownAt = SystemClock.uptimeMillis(); return }
+            }
+            if (manual && Prefs.geminiKey(this).isNotEmpty() && !Translate.lastUsedAi && groups.isNotEmpty())
+                toast("AI chưa dịch được (${Translate.lastAiError ?: "mất mạng?"}), dùng bộ dịch trong máy")
             boxesView?.show(list)
             if (list.isEmpty() && manual) toast("Không thấy chữ Trung trên màn hình")
             shownAt = SystemClock.uptimeMillis()
@@ -366,6 +393,44 @@ class ScreenTranslateService : Service() {
             busy = false
             setBusyUi(false)
         }
+    }
+
+    /** Gộp các mảnh chữ cùng một khung thoại thành một ô, sắp theo thứ tự đọc. */
+    private fun groupBlocks(result: com.google.mlkit.vision.text.Text): List<Pair<Rect, String>> {
+        data class Piece(val r: Rect, val text: String, val lineH: Int)
+        val topCut = (screenH * 0.035f).toInt()   // bỏ thanh trạng thái
+        val pieces = ArrayList<Piece>()
+        for (block in result.textBlocks) {
+            val r = block.boundingBox ?: continue
+            if (r.bottom < topCut) continue
+            val zh = block.lines.joinToString("") { it.text }.replace(Regex("\\s+"), "")
+            if (!CJK.containsMatchIn(zh)) continue
+            val lh = block.lines.mapNotNull { it.boundingBox?.height() }.average().let { if (it.isNaN()) r.height() else it.toInt() }
+            pieces.add(Piece(Rect(r), zh, lh.coerceAtLeast(8)))
+        }
+        if (pieces.isEmpty()) return emptyList()
+        // hợp nhất: chồng nhau, hoặc nằm sát trên/dưới và cùng cột
+        val parent = IntArray(pieces.size) { it }
+        fun find(x: Int): Int { var a = x; while (parent[a] != a) { parent[a] = parent[parent[a]]; a = parent[a] }; return a }
+        for (i in pieces.indices) for (j in i + 1 until pieces.size) {
+            val a = pieces[i].r; val b = pieces[j].r
+            val lh = maxOf(pieces[i].lineH, pieces[j].lineH)
+            val ov = minOf(a.right, b.right) - maxOf(a.left, b.left)
+            val narrow = minOf(a.width(), b.width()).coerceAtLeast(1)
+            val vGap = maxOf(a.top, b.top) - minOf(a.bottom, b.bottom)
+            val hGap = maxOf(a.left, b.left) - minOf(a.right, b.right)
+            val oh = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
+            val sameCol = ov > narrow * 0.3f && vGap < lh * 0.9f
+            val sameRow = oh > minOf(a.height(), b.height()) * 0.5f && hGap < lh * 0.6f
+            if (Rect.intersects(a, b) || sameCol || sameRow) parent[find(i)] = find(j)
+        }
+        val map = LinkedHashMap<Int, MutableList<Piece>>()
+        for (i in pieces.indices) map.getOrPut(find(i)) { ArrayList() }.add(pieces[i])
+        return map.values.map { ps ->
+            val sorted = ps.sortedWith(compareBy({ it.r.top / maxOf(1, it.lineH) }, { it.r.left }))
+            val u = Rect(sorted[0].r); for (p in sorted) u.union(p.r)
+            u to sorted.joinToString("") { it.text }
+        }.sortedWith(compareBy({ it.first.top }, { it.first.left }))
     }
 
     // ---------------- theo dõi lướt trang ----------------
@@ -436,6 +501,7 @@ class ScreenTranslateService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
         loopJob?.cancel()
         scope.cancel()
         try { boxesView?.let { wm.removeView(it) } } catch (_: Exception) {}
