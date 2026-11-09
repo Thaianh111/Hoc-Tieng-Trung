@@ -24,6 +24,13 @@ object Prefs {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("gemini_key", "")!!.trim()
     fun setGeminiKey(ctx: Context, key: String) =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString("gemini_key", key.trim()).apply()
+    /** Mẫu FreeModel đã chọn được lần trước (đỡ phải dò lại). */
+    fun fmModel(ctx: Context): String =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("fm_model", "")!!
+    fun setFmModel(ctx: Context, m: String) =
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString("fm_model", m).apply()
+    /** Mã FreeModel bắt đầu bằng fm_ , còn lại coi là mã Gemini. */
+    fun isFreeModel(key: String) = key.startsWith("fm_")
 }
 
 /**
@@ -76,7 +83,9 @@ object Translate {
             val pageKey = "g:" + texts.joinToString("\u0001")
             cache.get(pageKey)?.let { lastUsedAi = true; return it.split("\u0001") }
             val ai = try {
-                kotlinx.coroutines.withTimeoutOrNull(15000) { gemini(key, texts) }
+                kotlinx.coroutines.withTimeoutOrNull(if (Prefs.isFreeModel(key)) 25000 else 15000) {
+                    if (Prefs.isFreeModel(key)) freeModel(ctx, key, texts) else gemini(key, texts)
+                }
                     ?: run { lastAiError = "AI trả lời quá chậm"; null }
             } catch (e: Exception) { lastAiError = e.message; null }
             // AI bận: nghỉ 1 phút rồi mới thử lại, trong lúc đó dịch bằng máy cho nhanh
@@ -167,10 +176,105 @@ object Translate {
         null
     }
 
+    // ───────────── FreeModel (kiểu OpenAI) ─────────────
+    private const val FM_BASE = "https://freemodel.in/v1"
+    /** Ưu tiên mẫu nhỏ, nhanh, rẻ token; trong danh sách có gì thì lấy nấy. */
+    private val FM_PREFER = listOf("mini", "flash", "lite", "haiku", "small", "fast", "turbo")
+    private val FM_FALLBACK = listOf("gpt-5.4-mini", "gpt-4o-mini", "gpt-5-mini")
+
+    private fun http(method: String, url: String, key: String, body: String?): Pair<Int, String> {
+        val con = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 8000; readTimeout = 25000
+            setRequestProperty("Authorization", "Bearer $key")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            if (body != null) doOutput = true
+        }
+        return try {
+            if (body != null) con.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val c = con.responseCode
+            val r = (if (c in 200..299) con.inputStream else con.errorStream)
+                ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+            Pair(c, r)
+        } finally { con.disconnect() }
+    }
+
+    /** Hỏi FreeModel có những mẫu nào, xếp mẫu nhỏ/nhanh lên đầu. */
+    private fun fmCandidates(ctx: Context, key: String): List<String> {
+        val out = mutableListOf<String>()
+        Prefs.fmModel(ctx).takeIf { it.isNotEmpty() }?.let { out += it }
+        try {
+            val (code, resp) = http("GET", "$FM_BASE/models", key, null)
+            if (code == 401 || code == 403) throw AiBadKey("mã không đúng ($code)")
+            if (code in 200..299) {
+                val arr = JSONObject(resp).optJSONArray("data") ?: JSONArray()
+                val ids = List(arr.length()) { arr.getJSONObject(it).optString("id") }
+                    .filter { it.isNotBlank() && !it.contains("image", true) && !it.contains("embed", true) }
+                val ranked = ids.sortedBy { id ->
+                    FM_PREFER.indexOfFirst { id.contains(it, true) }.let { if (it < 0) 99 else it }
+                }
+                out += ranked
+            }
+        } catch (e: AiBadKey) { throw e } catch (_: Exception) { }
+        out += FM_FALLBACK
+        return out.distinct().take(6)
+    }
+
+    /** Lấy mảng JSON trong câu trả lời (AI hay thêm chữ hoặc ``` bao quanh). */
+    private fun parseArray(text: String): List<String> {
+        val t = text.trim()
+        val a = t.indexOf('['); val b = t.lastIndexOf(']')
+        val arr = JSONArray(if (a >= 0 && b > a) t.substring(a, b + 1) else t)
+        return List(arr.length()) { arr.optString(it, "") }
+    }
+
+    private suspend fun freeModel(ctx: Context, key: String, texts: List<String>): List<String>? = withContext(Dispatchers.IO) {
+        val input = JSONArray(texts).toString()
+        var lastBusy: String? = null
+        for (model in fmCandidates(ctx, key)) {
+            var attempt = 0
+            while (attempt < 2) {
+                attempt++
+                val body = JSONObject()
+                    .put("model", model)
+                    .put("temperature", 0.3)
+                    .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", PROMPT + input)))
+                val (code, resp) = http("POST", "$FM_BASE/chat/completions", key, body.toString())
+                when {
+                    code in 200..299 -> {
+                        val text = JSONObject(resp).getJSONArray("choices").getJSONObject(0)
+                            .getJSONObject("message").optString("content", "")
+                        val list = try { parseArray(text) } catch (e: Exception) { null }
+                        if (list != null) {
+                            if (Prefs.fmModel(ctx) != model) Prefs.setFmModel(ctx, model)
+                            return@withContext list
+                        }
+                        break                                                    // trả lời lộn xộn: thử mẫu khác
+                    }
+                    code == 401 -> throw AiBadKey("mã không đúng ($code)")
+                    code == 402 -> throw AiBusy("hết token miễn phí (402)")
+                    code == 429 || code >= 500 -> {
+                        lastBusy = "FreeModel đang bận ($code)"
+                        if (attempt < 2) delay(1000) else break
+                    }
+                    else -> {                                                    // 400/403/404: mẫu không dùng được
+                        if (Prefs.fmModel(ctx) == model) Prefs.setFmModel(ctx, "")
+                        lastBusy = "mẫu $model không dùng được ($code)"
+                        break
+                    }
+                }
+            }
+        }
+        if (lastBusy != null) throw AiBusy(lastBusy)
+        null
+    }
+
     /** Thử mã Gemini anh vừa dán. */
     /** 1 = dùng được, 0 = mã sai, -1 = mã đúng nhưng AI đang bận/mất mạng. */
-    suspend fun testKey(key: String): Int = try {
-        if (gemini(key, listOf("师父，我已经突破筑基了！"))?.firstOrNull()?.isNotBlank() == true) 1 else -1
+    suspend fun testKey(ctx: Context, key: String): Int = try {
+        val sample = listOf("师父，我已经突破筑基了！")
+        val r = if (Prefs.isFreeModel(key)) { Prefs.setFmModel(ctx, ""); freeModel(ctx, key, sample) } else gemini(key, sample)
+        if (r?.firstOrNull()?.isNotBlank() == true) 1 else -1
     } catch (e: AiBadKey) { lastAiError = e.message; 0 }
     catch (e: Exception) { lastAiError = e.message; -1 }
 }

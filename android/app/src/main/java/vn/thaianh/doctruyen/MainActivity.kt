@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
         // AI
         col.addView(card().apply {
             addView(text("✨ Dịch hay hơn bằng AI", 18f, true))
-            addView(text("Miễn phí. Lấy mã ở trang Google AI Studio rồi dán vào đây.", 15f, color = "#5A4A3A").apply { setPadding(0, dp(4), 0, dp(8)) })
+            addView(text("Miễn phí. Dán mã Gemini (AIza...) hoặc mã FreeModel (fm_live_...) vào đây. Mã chỉ lưu trong máy anh.", 15f, color = "#5A4A3A").apply { setPadding(0, dp(4), 0, dp(8)) })
             addView(Button(this@MainActivity).apply {
                 text = "🔑  Mở trang lấy mã"; isAllCaps = false; textSize = 16f
                 setTextColor(Color.parseColor(INK)); background = roundBg("#FFF3E0", 14, "#FFD8A8")
@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
                 }
             })
             keyInput = EditText(this@MainActivity).apply {
-                hint = "Dán mã vào đây (AIza...)"; textSize = 16f; setSingleLine()
+                hint = "Dán mã vào đây (AIza... hoặc fm_live_...)"; textSize = 16f; setSingleLine()
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
                 setText(Prefs.geminiKey(this@MainActivity))
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
@@ -270,10 +270,10 @@ class MainActivity : ComponentActivity() {
         if (k.isEmpty()) { keyStatus.text = "Đã xoá mã. App sẽ dùng bộ dịch trong máy."; return }
         keyStatus.text = "⏳ Đang thử mã..."
         lifecycleScope.launch {
-            keyStatus.text = when (Translate.testKey(k)) {
-                1 -> "✅ Mã dùng được! Từ giờ app dịch bằng AI."
+            keyStatus.text = when (Translate.testKey(this@MainActivity, k)) {
+                1 -> "✅ Mã dùng được! Từ giờ app dịch bằng AI" + (if (Prefs.isFreeModel(k)) " (FreeModel: ${Prefs.fmModel(this@MainActivity)})." else ".")
                 0 -> "❌ Mã không đúng (${Translate.lastAiError}). Anh copy lại mã nha."
-                else -> "🟡 Đã lưu mã. Máy chủ AI của Google đang bận (${Translate.lastAiError ?: "mạng chập chờn"}). App vẫn dịch bằng AI khi nó rảnh, lúc bận thì tự dùng bộ dịch trong máy."
+                else -> "🟡 Đã lưu mã. Máy chủ AI đang bận (${Translate.lastAiError ?: "mạng chập chờn"}). App vẫn dịch bằng AI khi nó rảnh, lúc bận thì tự dùng bộ dịch trong máy."
             }
         }
     }
