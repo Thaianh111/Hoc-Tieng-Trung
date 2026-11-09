@@ -26,9 +26,9 @@ object Prefs {
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString("gemini_key", key.trim()).apply()
     /** Mẫu FreeModel đã chọn được lần trước (đỡ phải dò lại). */
     fun fmModel(ctx: Context): String =
-        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("fm_model", "")!!
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("fm_model2", "")!!
     fun setFmModel(ctx: Context, m: String) =
-        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString("fm_model", m).apply()
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString("fm_model2", m).apply()
     /** Mã FreeModel bắt đầu bằng fm_ , còn lại coi là mã Gemini. */
     fun isFreeModel(key: String) = key.startsWith("fm_")
 }
@@ -92,6 +92,7 @@ object Translate {
             if (ai == null) aiCooldownUntil = System.currentTimeMillis() + 60_000
             if (ai != null && ai.size == texts.size) {
                 lastUsedAi = true; lastAiError = null
+                lastPageVi = ai
                 cache.put(pageKey, ai.joinToString("\u0001"))
                 return ai
             }
@@ -100,16 +101,26 @@ object Translate {
     }
 
     private const val PROMPT =
-        "Bạn là dịch giả truyện tranh Trung Quốc (manhua) sang tiếng Việt cho độc giả Việt Nam.\n" +
-        "Dưới đây là các khung thoại trên CÙNG MỘT TRANG truyện, theo thứ tự đọc. Hãy dùng ngữ cảnh chung để dịch.\n" +
-        "Yêu cầu:\n" +
-        "- Dịch tự nhiên, trôi chảy như truyện tranh tiếng Việt, kiểu văn convert quen thuộc.\n" +
-        "- Truyện tu tiên, cổ trang: xưng hô ta/ngươi, tại hạ, các hạ, sư phụ, sư huynh, sư tỷ, tiền bối, bổn tọa...\n" +
-        "- Truyện đô thị, hiện đại: xưng hô tôi/anh/em/cô/cậu/mày/tao theo đúng quan hệ nhân vật.\n" +
-        "- Tên người, tên môn phái, chiêu thức, cảnh giới giữ âm Hán Việt (ví dụ: Trúc Cơ, Kim Đan, Thiên Kiếm Tông).\n" +
-        "- Câu ngắn gọn để vừa khung thoại, giữ cảm xúc (!, ?, ...).\n" +
-        "- Tiếng động, ký hiệu: dịch rất ngắn hoặc giữ nguyên. Chữ nhận sai, vô nghĩa: trả về chuỗi rỗng.\n" +
-        "Chỉ trả về một mảng JSON các chuỗi, ĐÚNG số phần tử và ĐÚNG thứ tự như đầu vào.\n\nĐầu vào:\n"
+        "Bạn là dịch giả manhua (truyện tranh Trung) sang tiếng Việt lâu năm, văn phong như các nhóm dịch truyện tranh Việt Nam.\n" +
+        "Đầu vào là chữ máy quét (OCR) từ các khung thoại trên CÙNG MỘT TRANG, theo thứ tự đọc. OCR có thể nhận sai/thiếu vài chữ, " +
+        "dính chữ của khung bên cạnh: hãy đoán ý đúng theo ngữ cảnh, đừng dịch máy móc theo từng chữ sai.\n" +
+        "Cách dịch:\n" +
+        "- Dịch Ý, không dịch từng chữ. Câu tiếng Việt phải đọc tự nhiên như người Việt nói, ngắn gọn vừa khung thoại.\n" +
+        "- Đoán thể loại và quan hệ nhân vật từ nội dung (và trang trước nếu có) rồi chọn xưng hô cho đúng, GIỮ NHẤT QUÁN: " +
+        "tu tiên/cổ trang dùng ta/ngươi, ta/con, sư phụ, tiền bối, tại hạ, bổn tọa...; hiện đại dùng tôi/anh/em/cậu/tớ/mày/tao...\n" +
+        "- Tên riêng, cảnh giới, công pháp, môn phái để âm Hán Việt (Trúc Cơ, Kim Đan, Thanh Vân Tông).\n" +
+        "- Thành ngữ, câu chửi, câu cà khịa: dùng cách nói tương đương của tiếng Việt cho có hồn.\n" +
+        "- Tiếng động (轰, 砰, 哈哈): dịch thật ngắn (Ầm!, Bốp!, Haha). Chữ rác vô nghĩa: trả \"\".\n" +
+        "CHỈ trả về một mảng JSON các chuỗi, đúng số phần tử và đúng thứ tự đầu vào. Không đánh số, không giải thích.\n"
+
+    /** Trang vừa dịch xong, gửi kèm để AI giữ xưng hô và mạch truyện. */
+    @Volatile private var lastPageVi: List<String> = emptyList()
+
+    private fun pageInput(texts: List<String>): String {
+        val prev = lastPageVi.filter { it.isNotBlank() }.takeLast(8)
+        val ctx = if (prev.isEmpty()) "" else "Trang trước (đã dịch, chỉ để tham khảo ngữ cảnh): " + JSONArray(prev) + "\n"
+        return ctx + "Trang này:\n" + JSONArray(texts)
+    }
 
     /** Lỗi do máy chủ AI bận (không phải do mã). */
     class AiBusy(msg: String) : RuntimeException(msg)
@@ -120,7 +131,7 @@ object Translate {
     )
 
     private suspend fun gemini(key: String, texts: List<String>): List<String>? = withContext(Dispatchers.IO) {
-        val input = JSONArray(texts).toString()
+        val input = pageInput(texts)
         var lastBusy: String? = null
         for (model in MODELS) {
             var thinkingOff = true
@@ -156,9 +167,7 @@ object Translate {
                     code in 200..299 -> {
                         val text = JSONObject(resp).getJSONArray("candidates").getJSONObject(0)
                             .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                        val clean = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-                        val arr = JSONArray(clean)
-                        return@withContext List(arr.length()) { arr.optString(it, "") }
+                        return@withContext parseArray(text, texts.size)
                     }
                     code == 400 && resp.contains("API_KEY_INVALID") -> throw AiBadKey("mã không đúng")
                     code == 400 && thinkingOff -> { thinkingOff = false; attempt-- }   // mẫu không hỗ trợ tắt suy nghĩ
@@ -178,8 +187,9 @@ object Translate {
 
     // ───────────── FreeModel (kiểu OpenAI) ─────────────
     private const val FM_BASE = "https://freemodel.in/v1"
-    /** Mẫu nhanh (~3 giây/trang), đã thử dịch truyện ngon. Mẫu "pro" suy nghĩ lâu nên không dùng. */
-    private val FM_FAST = listOf("gemini-3.6-flash", "deepseek-v4.1-flash", "seed-2.1-turbo", "gemini-3.7-flash", "glm-5.3-flash")
+    /** Đã thử dịch truyện: qwen (rành tiếng Trung), gpt-5.5, kimi dịch mượt và trả đúng dạng, ~4-5 giây/trang.
+     *  Mẫu flash nhanh hơn nhưng hay trả sai dạng nên để dự phòng. */
+    private val FM_FAST = listOf("qwen3.7-max", "gpt-5.5", "kimi-k3", "deepseek-v4.1-flash", "gemini-3.6-flash")
 
     private fun http(method: String, url: String, key: String, body: String?): Pair<Int, String> {
         val con = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -204,16 +214,22 @@ object Translate {
         return if (saved in FM_FAST) listOf(saved) + (FM_FAST - saved) else FM_FAST
     }
 
-    /** Lấy mảng JSON trong câu trả lời (AI hay thêm chữ hoặc ``` bao quanh). */
-    private fun parseArray(text: String): List<String> {
+    /** Lấy bản dịch trong câu trả lời: mảng JSON, hoặc danh sách "1. ..." nếu AI lỡ trả kiểu đó. */
+    private fun parseArray(text: String, n: Int): List<String>? {
         val t = text.trim()
         val a = t.indexOf('['); val b = t.lastIndexOf(']')
-        val arr = JSONArray(if (a >= 0 && b > a) t.substring(a, b + 1) else t)
-        return List(arr.length()) { arr.optString(it, "") }
+        try {
+            val arr = JSONArray(if (a >= 0 && b > a) t.substring(a, b + 1) else t)
+            val l = List(arr.length()) { arr.optString(it, "") }
+            if (l.size == n) return l
+        } catch (_: Exception) { }
+        val num = Regex("^\\s*\\d+\\s*[.):、]\\s*(.*)$")
+        val lines = t.lines().mapNotNull { num.find(it)?.groupValues?.get(1)?.trim()?.trim('"', '“', '”', '「', '」') }
+        return if (lines.size == n) lines else null
     }
 
     private suspend fun freeModel(ctx: Context, key: String, texts: List<String>): List<String>? = withContext(Dispatchers.IO) {
-        val input = JSONArray(texts).toString()
+        val input = pageInput(texts)
         var lastBusy: String? = null
         for (model in fmCandidates(ctx)) {
             var attempt = 0
@@ -221,14 +237,16 @@ object Translate {
                 attempt++
                 val body = JSONObject()
                     .put("model", model)
-                    .put("temperature", 0.3)
-                    .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", PROMPT + input)))
+                    .put("temperature", 0.4)
+                    .put("messages", JSONArray()
+                        .put(JSONObject().put("role", "system").put("content", PROMPT))
+                        .put(JSONObject().put("role", "user").put("content", input)))
                 val (code, resp) = http("POST", "$FM_BASE/chat/completions", key, body.toString())
                 when {
                     code in 200..299 -> {
                         val text = JSONObject(resp).getJSONArray("choices").getJSONObject(0)
                             .getJSONObject("message").optString("content", "")
-                        val list = try { parseArray(text) } catch (e: Exception) { null }
+                        val list = parseArray(text, texts.size)
                         if (list != null) {
                             if (Prefs.fmModel(ctx) != model) Prefs.setFmModel(ctx, model)
                             return@withContext list
