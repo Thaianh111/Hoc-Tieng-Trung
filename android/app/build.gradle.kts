@@ -13,6 +13,8 @@ android {
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        // chỉ build cho máy 64-bit (RedMagic và hầu hết điện thoại mới) cho file nhẹ hơn
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     signingConfigs {
