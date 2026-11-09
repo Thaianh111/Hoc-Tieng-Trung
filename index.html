@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đọc Truyện Trung</title>
+<style>
+:root{--bg:#fffaf2;--card:#fff;--ink:#2b2118;--mute:#7a6a5a;--hv:#c2410c;--py:#2563eb;--line:#eadfce;--ok:#15803d;--accent:#b91c1c}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;font-size:18px;line-height:1.45}
+.zh{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif}
+header{padding:14px 16px 6px}
+header h1{margin:0;font-size:22px}
+header p{margin:2px 0 0;color:var(--mute);font-size:15px}
+main{padding:8px 14px 110px;max-width:760px;margin:0 auto}
+.tab{display:none}.tab.on{display:block}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#fff;border-top:1px solid var(--line);z-index:20}
+nav button{flex:1;border:0;background:none;padding:10px 4px 12px;font-size:15px;color:var(--mute);font-weight:600}
+nav button b{display:block;font-size:24px}
+nav button.on{color:var(--accent)}
+.big{display:block;width:100%;padding:18px;border-radius:16px;border:0;background:var(--accent);color:#fff;font-size:20px;font-weight:700;margin:10px 0}
+.btn{padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:17px;font-weight:600;color:var(--ink)}
+.btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.row .btn{flex:1}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:12px 0}
+.hint{color:var(--mute);font-size:15px}
+#imgbox{position:relative;touch-action:none;user-select:none;margin:8px 0;border-radius:12px;overflow:hidden;border:1px solid var(--line);display:none}
+#imgbox img{display:block;width:100%}
+#sel{position:absolute;border:3px solid #f59e0b;background:rgba(245,158,11,.18);display:none;pointer-events:none}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:12px;padding:6px 10px;text-align:center;min-width:52px;cursor:pointer}
+.chip:active{background:#fef3c7}
+.chip .h{font-size:30px;line-height:1.2}
+.chip .v{font-size:15px;color:var(--hv);font-weight:700}
+.chip.p{border:0;background:none;min-width:auto;padding:6px 2px;cursor:default}
+.chip.p .h{color:var(--mute)}
+.chip.saved{border-color:#f59e0b;background:#fffbeb}
+.sent-hv{color:var(--hv);font-weight:600;margin-top:10px;font-size:17px}
+textarea{width:100%;min-height:80px;font-size:22px;border-radius:12px;border:1px solid var(--line);padding:10px}
+#status{font-size:16px;color:var(--mute);margin:6px 0;min-height:1.2em}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;display:none}.bar i{display:block;height:100%;width:0;background:var(--accent)}
+/* sheet */
+#mask{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:30}
+#sheet{position:fixed;left:0;right:0;bottom:0;background:#fff;border-radius:22px 22px 0 0;padding:18px 18px 26px;z-index:31;transform:translateY(105%);transition:transform .2s;max-height:88vh;overflow:auto;max-width:760px;margin:0 auto}
+#sheet:not(.on){visibility:hidden;transition:transform .2s,visibility 0s .2s}
+#sheet.on{transform:none}
+.dz{font-size:64px;line-height:1.1;text-align:center}
+.dhv{font-size:30px;color:var(--hv);font-weight:800;text-align:center;text-transform:capitalize}
+.dpy{font-size:20px;color:var(--py);text-align:center}
+.mean{font-size:19px;margin:10px 0;padding:10px 12px;background:var(--bg);border-radius:12px}
+.mean small{color:var(--mute);display:block;font-size:14px}
+.list .it{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line)}
+.list .it .h{font-size:30px;min-width:70px}
+.list .it .t{flex:1}
+.list .it .t b{color:var(--hv)}
+.del{border:0;background:none;font-size:22px}
+h2{font-size:20px;margin:18px 0 6px}
+.flash{text-align:center;padding:26px 10px;cursor:pointer;min-height:240px}
+.flash .dz{font-size:84px}
+footer{color:var(--mute);font-size:13px;text-align:center;margin-top:30px}
+footer a{color:var(--mute)}
+</style>
+</head>
+<body>
+<header>
+  <h1>📖 Đọc Truyện Trung</h1>
+  <p>Chụp truyện Tencent → bấm chữ → hiểu nghĩa bằng Hán Việt</p>
+</header>
+<main>
+<!-- ĐỌC -->
+<section class="tab on" id="t-doc">
+  <input type="file" id="file" accept="image/*" hidden>
+  <button class="big" id="pick">📷 Chọn ảnh chụp truyện</button>
+  <div id="imgbox"><img id="img" alt=""><div id="sel"></div></div>
+  <div id="imgctl" style="display:none">
+    <p class="hint">👉 Lấy ngón tay <b>kéo khoanh</b> quanh 1 khung lời thoại (đọc chính xác hơn), rồi bấm nút.</p>
+    <div class="row">
+      <button class="btn pri" id="ocrSel">🔍 Đọc vùng khoanh</button>
+      <button class="btn" id="ocrAll">Đọc cả ảnh</button>
+    </div>
+  </div>
+  <div id="status"></div>
+  <div class="bar" id="bar"><i></i></div>
+  <div class="card" id="result" style="display:none">
+    <div class="row" style="margin-top:0"><button class="btn" id="sayAll">🔊 Nghe cả câu</button><button class="btn" id="editTxt">✏️ Sửa chữ</button></div>
+    <div class="chips zh" id="chips"></div>
+    <div class="sent-hv" id="senthv"></div>
+    <p class="hint">Bấm vào chữ để xem nghĩa. Dòng màu cam là âm Hán Việt cả câu.</p>
+  </div>
+  <details class="card">
+    <summary><b>✍️ Hoặc dán chữ Trung vào đây</b></summary>
+    <textarea id="paste" class="zh" placeholder="Dán chữ Trung..."></textarea>
+    <button class="btn pri" id="goPaste" style="width:100%;margin-top:8px">Xem nghĩa</button>
+  </details>
+</section>
+
+<!-- SỔ -->
+<section class="tab" id="t-so">
+  <h2>📒 Sổ chữ của anh <span id="cnt" class="hint"></span></h2>
+  <button class="big" id="startFlash">🧠 Ôn nhanh 10 chữ</button>
+  <div class="card flash" id="flash" style="display:none"></div>
+  <div class="list" id="solist"></div>
+</section>
+
+<!-- HỌC TRƯỚC -->
+<section class="tab" id="t-hoc">
+  <h2>⭐ Chữ hay gặp trong truyện</h2>
+  <p class="hint">Học mấy chữ này trước là đọc truyện tu tiên, xuyên không, đô thị, hậu cung dễ hơn nhiều. Bấm chữ để nghe và xem nghĩa.</p>
+  <div id="groups"></div>
+</section>
+
+<footer>© Võ Thái Anh · Từ điển: <a href="https://github.com/ph0ngp/CVDICT">CVDICT</a> (CC BY-SA 4.0) · Hán Việt: <a href="https://github.com/ph0ngp/hanviet-pinyin-words">hanviet-pinyin-words</a> · Đọc chữ: <a href="https://github.com/naptha/tesseract.js">Tesseract.js</a></footer>
+</main>
+
+<nav>
+  <button class="on" data-t="t-doc"><b>📖</b>Đọc truyện</button>
+  <button data-t="t-so"><b>📒</b>Sổ chữ</button>
+  <button data-t="t-hoc"><b>⭐</b>Học trước</button>
+</nav>
+
+<div id="mask"></div>
+<div id="sheet"></div>
+
+<script src="ocr/tesseract.min.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const isZh=c=>/[㐀-鿿豈-﫿]/.test(c);
+let DICT=new Map(), GENRE=new Map(), GROUPS=[], dictReady=false;
+const status=t=>$('#status').textContent=t||'';
+const bar=p=>{const b=$('#bar');if(p==null){b.style.display='none';return}b.style.display='block';b.firstElementChild.style.width=Math.round(p*100)+'%'};
+
+// ---------- storage ----------
+const KEY='doc-truyen-trung-so';
+let SO={};
+try{SO=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){SO={}}
+function saveSo(){try{localStorage.setItem(KEY,JSON.stringify(SO))}catch(e){}renderSo()}
+
+// ---------- data ----------
+async function loadData(){
+  status('Đang tải từ điển (lần đầu hơi lâu, anh chờ xíu)...');
+  try{
+    const [g,t]=await Promise.all([fetch('genre.json').then(r=>r.json()),fetch('dict.txt').then(r=>r.text())]);
+    GROUPS=g;
+    for(const grp of g)for(const [w,py,hv,m] of grp.words)GENRE.set(w,{py,hv,m});
+    for(const line of t.split('\n')){
+      const [w,py,hv,m]=line.split('\t');
+      if(!w)continue;
+      let a=DICT.get(w);if(!a){a=[];DICT.set(w,a)}
+      a.push({py,hv,m});
+    }
+    dictReady=true;status('');
+    renderGroups();renderSo();
+  }catch(e){status('Không tải được từ điển. Anh kiểm tra mạng rồi mở lại nha.')}
+}
+function charHV(c){const a=DICT.get(c);return a&&a[0]&&a[0].hv&&a[0].hv!=='?'?a[0].hv:'?'}
+function fixHV(w,hv){
+  const parts=(hv||'').split(' ');
+  if(parts.length!==w.length)return [...w].map(charHV).join(' ');
+  return parts.map((p,i)=>p==='?'||!p?charHV(w[i]):p).join(' ');
+}
+function lookup(w){
+  const out=[];const g=GENRE.get(w);
+  if(g)out.push({py:g.py,hv:g.hv,m:g.m,mine:true});
+  for(const e of DICT.get(w)||[])out.push({py:e.py,hv:fixHV(w,e.hv),m:e.m});
+  return out;
+}
+const known=w=>GENRE.has(w)||DICT.has(w);
+
+// ---------- segment ----------
+function segment(text){
+  const toks=[];const s=[...text];let i=0;
+  while(i<s.length){
+    const c=s[i];
+    if(c==='\n'){toks.push({br:true});i++;continue}
+    if(!isZh(c)){toks.push({p:c});i++;continue}
+    let len=1;
+    for(let L=Math.min(4,s.length-i);L>1;L--){const w=s.slice(i,i+L).join('');if(known(w)){len=L;break}}
+    const w=s.slice(i,i+len).join('');toks.push({w});i+=len;
+  }
+  return toks;
+}
+function cleanOCR(t){
+  return t.replace(/[ \t]+/g,(m,o,s)=>'').replace(/\n{2,}/g,'\n').replace(/[|_~`]/g,'').trim();
+}
+
+// ---------- show text ----------
+let curText='';
+function showText(text){
+  curText=text;
+  const toks=segment(text);
+  const box=$('#chips');box.innerHTML='';
+  const hvLine=[];
+  for(const t of toks){
+    if(t.br){const d=document.createElement('div');d.style.flexBasis='100%';box.appendChild(d);hvLine.push('\n');continue}
+    const el=document.createElement('div');
+    if(t.p){if(!t.p.trim())continue;el.className='chip p';el.innerHTML='<div class="h">'+esc(t.p)+'</div>';box.appendChild(el);hvLine.push(t.p);continue}
+    const L=lookup(t.w);const hv=L[0]?L[0].hv:[...t.w].map(charHV).join(' ');
+    el.className='chip'+(SO[t.w]?' saved':'');
+    el.innerHTML='<div class="h">'+esc(t.w)+'</div><div class="v">'+esc(hv)+'</div>';
+    el.onclick=()=>openWord(t.w);
+    box.appendChild(el);hvLine.push(hv);
+  }
+  $('#senthv').textContent=hvLine.join(' ').replace(/ ([，。！？,.!?、：；])/g,'$1').replace(/ *\n */g,' / ');
+  $('#result').style.display=toks.some(t=>t.w)?'block':'none';
+  if(!toks.some(t=>t.w))status('Không thấy chữ Trung nào. Anh thử khoanh sát khung lời thoại hơn nha.');
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------- speech ----------
+let zhVoice=null;
+function pickVoice(){try{const v=speechSynthesis.getVoices();zhVoice=v.find(x=>/zh[-_]CN/i.test(x.lang))||v.find(x=>/^zh/i.test(x.lang))||null}catch(e){}}
+try{pickVoice();speechSynthesis.onvoiceschanged=pickVoice}catch(e){}
+function say(t){
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(t);u.lang='zh-CN';u.rate=.75;if(zhVoice)u.voice=zhVoice;
+    speechSynthesis.speak(u);
+  }catch(e){status('Máy chưa đọc được tiếng Trung. Anh vào Cài đặt → Chuyển văn bản thành giọng nói → cài tiếng Trung nha.')}
+}
+
+// ---------- detail sheet ----------
+function openWord(w){
+  const L=lookup(w);
+  const hv=L[0]?L[0].hv:[...w].map(charHV).join(' ');
+  const py=L[0]?L[0].py:'';
+  let h='<div class="dz zh">'+esc(w)+'</div><div class="dhv">'+esc(hv)+'</div><div class="dpy">'+esc(py)+'</div>';
+  const seen=new Set();
+  for(const e of L){const k=e.py+e.m;if(seen.has(k))continue;seen.add(k);
+    h+='<div class="mean">'+esc(e.m)+'<small>'+esc(e.py)+' · '+esc(e.hv)+(e.mine?' · nghĩa hay dùng trong truyện':'')+'</small></div>';
+    if(seen.size>=3)break}
+  if(!L.length)h+='<div class="mean">Chưa có trong từ điển. Anh xem từng chữ bên dưới nha.</div>';
+  h+='<div class="row"><button class="btn pri" id="sSay">🔊 Nghe</button><button class="btn" id="sSave">'+(SO[w]?'✅ Đã lưu (bỏ lưu)':'⭐ Lưu vào sổ')+'</button></div>';
+  if([...w].length>1){
+    h+='<p class="hint">Từng chữ:</p><div class="chips zh">'+[...w].map(c=>'<div class="chip" data-c="'+esc(c)+'"><div class="h">'+esc(c)+'</div><div class="v">'+esc(charHV(c))+'</div></div>').join('')+'</div>';
+  }
+  h+='<button class="btn" id="sClose" style="width:100%;margin-top:14px">Đóng</button>';
+  const sh=$('#sheet');sh.innerHTML=h;
+  sh.querySelector('#sSay').onclick=()=>say(w);
+  sh.querySelector('#sSave').onclick=()=>{
+    if(SO[w])delete SO[w];else SO[w]={hv,py,m:L[0]?L[0].m:'',t:Date.now(),ok:0};
+    saveSo();openWord(w);if(curText)showText(curText);
+  };
+  sh.querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>openWord(el.dataset.c));
+  sh.querySelector('#sClose').onclick=closeSheet;
+  sh.classList.add('on');$('#mask').style.display='block';sh.scrollTop=0;
+  say(w);
+}
+function closeSheet(){$('#sheet').classList.remove('on');$('#mask').style.display='none'}
+$('#mask').onclick=closeSheet;
+
+// ---------- image + selection ----------
+let imgEl=$('#img'),sel=null,drag=null;
+$('#pick').onclick=()=>$('#file').click();
+$('#file').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const url=URL.createObjectURL(f);
+  imgEl.onload=()=>{$('#imgbox').style.display='block';$('#imgctl').style.display='block';status('');};
+  imgEl.src=url;sel=null;$('#sel').style.display='none';$('#pick').textContent='📷 Chọn ảnh khác';
+  e.target.value='';
+};
+const box=$('#imgbox');
+function pt(ev){const r=box.getBoundingClientRect();return{x:Math.max(0,Math.min(r.width,ev.clientX-r.left)),y:Math.max(0,Math.min(r.height,ev.clientY-r.top))}}
+box.addEventListener('pointerdown',ev=>{drag=pt(ev);box.setPointerCapture(ev.pointerId);sel=null});
+box.addEventListener('pointermove',ev=>{if(!drag)return;const p=pt(ev);sel={x:Math.min(p.x,drag.x),y:Math.min(p.y,drag.y),w:Math.abs(p.x-drag.x),h:Math.abs(p.y-drag.y)};
+  const s=$('#sel');s.style.display='block';Object.assign(s.style,{left:sel.x+'px',top:sel.y+'px',width:sel.w+'px',height:sel.h+'px'})});
+box.addEventListener('pointerup',()=>{drag=null;if(sel&&(sel.w<15||sel.h<15)){sel=null;$('#sel').style.display='none'}});
+
+function cropCanvas(useSel){
+  const nw=imgEl.naturalWidth,nh=imgEl.naturalHeight,k=nw/imgEl.clientWidth;
+  let x=0,y=0,w=nw,h=nh;
+  if(useSel&&sel){x=sel.x*k;y=sel.y*k;w=sel.w*k;h=sel.h*k}
+  // phóng to cho chữ rõ
+  let sc=1;const target=useSel?900:1600;if(Math.max(w,h)<target)sc=Math.min(3,target/Math.max(w,h));
+  const c=document.createElement('canvas');c.width=Math.round(w*sc);c.height=Math.round(h*sc);
+  const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+  g.imageSmoothingQuality='high';g.drawImage(imgEl,x,y,w,h,0,0,c.width,c.height);
+  // trắng đen + tăng tương phản
+  const d=g.getImageData(0,0,c.width,c.height),p=d.data;
+  for(let i=0;i<p.length;i+=4){let v=.299*p[i]+.587*p[i+1]+.114*p[i+2];v=(v-128)*1.5+128;v=v<0?0:v>255?255:v;p[i]=p[i+1]=p[i+2]=v}
+  g.putImageData(d,0,0);
+  return c;
+}
+
+// ---------- OCR ----------
+let worker=null;
+async function getWorker(){
+  if(worker)return worker;
+  status('Đang tải bộ đọc chữ (chỉ lần đầu, khoảng 10–30 giây)...');bar(0);
+  const base=new URL('ocr/',location.href).href;
+  worker=await Tesseract.createWorker('chi_sim',1,{
+    workerPath:base+'worker.min.js',corePath:base,langPath:base.replace(/\/$/,''),
+    workerBlobURL:false,cacheMethod:'none',
+    logger:m=>{if(m.progress!=null)bar(m.progress);if(m.status==='recognizing text')status('Đang đọc chữ trong ảnh...')}
+  });
+  return worker;
+}
+async function runOCR(useSel){
+  if(!dictReady){status('Từ điển chưa tải xong, anh chờ xíu nha.');return}
+  if(useSel&&!sel){status('Anh kéo ngón tay khoanh 1 khung lời thoại trước nha, hoặc bấm "Đọc cả ảnh".');return}
+  $('#ocrSel').disabled=$('#ocrAll').disabled=true;
+  try{
+    const w=await getWorker();
+    status('Đang đọc chữ trong ảnh...');
+    const r=await w.recognize(cropCanvas(useSel));
+    bar(null);status('');
+    showText(cleanOCR(r.data.text));
+    $('#result').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){bar(null);status('Đọc ảnh bị lỗi: '+(e&&e.message||e)+'. Anh thử lại nha.');worker=null}
+  $('#ocrSel').disabled=$('#ocrAll').disabled=false;
+}
+$('#ocrSel').onclick=()=>runOCR(true);
+$('#ocrAll').onclick=()=>runOCR(false);
+$('#sayAll').onclick=()=>say(curText.replace(/\n/g,'，'));
+$('#editTxt').onclick=()=>{const d=document.querySelector('details');d.open=true;$('#paste').value=curText;$('#paste').focus()};
+$('#goPaste').onclick=()=>{const t=$('#paste').value.trim();if(!t)return;if(!dictReady){status('Từ điển chưa tải xong.');return}showText(t);$('#result').scrollIntoView({behavior:'smooth'})};
+
+// ---------- tabs ----------
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id===b.dataset.t));
+  window.scrollTo(0,0);
+});
+
+// ---------- học trước ----------
+function renderGroups(){
+  const el=$('#groups');el.innerHTML='';
+  for(const g of GROUPS){
+    const c=document.createElement('div');c.className='card';
+    c.innerHTML='<h2 style="margin-top:0">'+esc(g.name)+'</h2><div class="chips zh"></div><button class="btn" style="width:100%;margin-top:10px">⭐ Lưu cả nhóm vào sổ</button>';
+    const ch=c.querySelector('.chips');
+    for(const [w,py,hv,m] of g.words){
+      const x=document.createElement('div');x.className='chip'+(SO[w]?' saved':'');
+      x.innerHTML='<div class="h">'+esc(w)+'</div><div class="v">'+esc(hv)+'</div>';x.onclick=()=>openWord(w);ch.appendChild(x);
+    }
+    c.querySelector('button').onclick=()=>{for(const [w,py,hv,m] of g.words)if(!SO[w])SO[w]={hv,py,m,t:Date.now(),ok:0};saveSo();renderGroups()};
+    el.appendChild(c);
+  }
+}
+
+// ---------- sổ ----------
+function renderSo(){
+  const ws=Object.keys(SO).sort((a,b)=>SO[b].t-SO[a].t);
+  $('#cnt').textContent='('+ws.length+' chữ)';
+  const el=$('#solist');
+  if(!ws.length){el.innerHTML='<p class="hint">Chưa có chữ nào. Khi xem nghĩa, anh bấm ⭐ Lưu vào sổ là chữ hiện ở đây.</p>';return}
+  el.innerHTML='';
+  for(const w of ws){
+    const s=SO[w];const it=document.createElement('div');it.className='it';
+    it.innerHTML='<div class="h zh">'+esc(w)+'</div><div class="t"><b>'+esc(s.hv)+'</b> · '+esc(s.py)+'<br><span class="hint">'+esc(s.m)+'</span></div><button class="del">🗑</button>';
+    it.querySelector('.t').onclick=it.querySelector('.h').onclick=()=>openWord(w);
+    it.querySelector('.del').onclick=()=>{delete SO[w];saveSo()};
+    el.appendChild(it);
+  }
+}
+// ôn nhanh: ưu tiên chữ chưa nhớ
+let deck=[],di=0,flipped=false;
+$('#startFlash').onclick=()=>{
+  const ws=Object.keys(SO);if(!ws.length){status('');alertBox('Sổ chưa có chữ. Anh lưu vài chữ trước nha.');return}
+  deck=ws.sort((a,b)=>(SO[a].ok-SO[b].ok)||(Math.random()-.5)).slice(0,10);di=0;flipped=false;showFlash();
+};
+function alertBox(t){const f=$('#flash');f.style.display='block';f.innerHTML='<p>'+esc(t)+'</p>'}
+function showFlash(){
+  const f=$('#flash');f.style.display='block';
+  if(di>=deck.length){f.innerHTML='<div style="font-size:48px">🎉</div><p><b>Xong rồi! Anh giỏi lắm.</b><br>Mai ôn tiếp nha.</p>';return}
+  const w=deck[di],s=SO[w];
+  if(!flipped){f.innerHTML='<p class="hint">Chữ '+(di+1)+'/'+deck.length+' — nhớ nghĩa không? Bấm để lật</p><div class="dz zh">'+esc(w)+'</div>';f.onclick=()=>{flipped=true;say(w);showFlash()}}
+  else{
+    f.onclick=null;
+    f.innerHTML='<div class="dz zh">'+esc(w)+'</div><div class="dhv">'+esc(s.hv)+'</div><div class="dpy">'+esc(s.py)+'</div><div class="mean">'+esc(s.m)+'</div><div class="row"><button class="btn" id="fNo">😅 Chưa nhớ</button><button class="btn pri" id="fOk">👍 Nhớ rồi</button></div>';
+    f.querySelector('#fNo').onclick=()=>{s.ok=Math.max(0,s.ok-1);saveSo();deck.push(w);next()};
+    f.querySelector('#fOk').onclick=()=>{s.ok++;saveSo();next()};
+  }
+}
+function next(){di++;flipped=false;showFlash()}
+
+loadData();
+</script>
+</body>
+</html>
